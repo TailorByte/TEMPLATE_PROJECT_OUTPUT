@@ -1,0 +1,57 @@
+[flake8]
+# Base settings:
+# E***: PEP8 errors
+# W***: PEP8 warnings
+# F***: PyFlakes messages
+# C9**: McCabe complexity
+# N***: Naming conventions (pep8-naming)
+select = E,W,F,C9,N
+
+# Ignore specific errors/warnings:
+# E501: line too long (handled by Black)
+# W503: line break before binary operator (Black prefers after)
+# E203: whitespace before ':' (Black compatibility)
+ignore = E501, W503, E203
+
+# Max line length (Black default is 88)
+max-line-length = 88
+
+# Max complexity for McCabe
+max-complexity = 10
+
+# Per-file ignores (example):
+# migrations:
+#   E501: Allow long lines in migrations if necessary
+# tests:
+#   N802: Allow function names like `test_MyFunction`
+
+# Exclude files/directories:
+exclude =
+    .git,
+    __pycache__,
+    docs/conf.py,
+    build,
+    dist,
+    *.egg-info,
+    venv,
+    .venv,
+    env,
+    .env,
+    node_modules,
+    */migrations/*, # Often auto-generated and can have long lines or specific naming
+    */tests/fixtures/* # Fixtures might have specific naming or structures
+
+# Enable pep8-naming if installed (N*** checks)
+# You might need to install it: pip install pep8-naming
+# N802: function name should be lowercase
+# N803: argument name should be lowercase
+# N806: variable in function should be lowercase
+# N801: class name should be CapWords
+# N804: error suffix for exception names (e.g. MyError not MyException)
+# N805: first argument of a method should be self (for regular methods) or cls (for class methods)
+# N807: init method should be __init__
+# N811: constant imported as non constant
+# N812: lowercase imported as non lowercase
+# N813: camelcase imported as lowercase
+# N814: camelcase imported as constant
+# N818: Exception class name should end with 'Error'
