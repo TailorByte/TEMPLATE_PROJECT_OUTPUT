@@ -1,0 +1,121 @@
+.errorDisplay {
+  padding: 1rem 1.25rem;
+  margin-bottom: 1rem;
+  border: 1px solid transparent;
+  border-radius: 0.25rem;
+  font-size: 0.9rem;
+}
+
+.errorHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.errorTitle {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 500;
+}
+
+.closeButton {
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  font-weight: bold;
+  line-height: 1;
+  color: inherit; /* Inherit color from parent for better theming */
+  opacity: 0.7;
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+}
+
+.closeButton:hover {
+  opacity: 1;
+}
+
+.errorMessage p {
+  margin-top: 0;
+  margin-bottom: 0.5rem;
+}
+
+.validationList {
+  margin-top: 0.5rem;
+  margin-bottom: 0;
+  padding-left: 1.25rem;
+}
+
+.validationList li {
+  margin-bottom: 0.25rem;
+}
+
+.errorActions {
+  margin-top: 0.75rem;
+  text-align: right;
+}
+
+.retryButton {
+  padding: 0.375rem 0.75rem;
+  font-size: 0.9rem;
+  border-radius: 0.2rem;
+  cursor: pointer;
+  background-color: #6c757d; /* Secondary button color */
+  color: white;
+  border: 1px solid #6c757d;
+}
+
+.retryButton:hover {
+  background-color: #5a6268;
+  border-color: #545b62;
+}
+
+/* Default/Unknown Error Type */
+.unknown {
+  color: #721c24; /* Dark red text */
+  background-color: #f8d7da; /* Light red background */
+  border-color: #f5c6cb; /* Reddish border */
+}
+.unknown .errorTitle {
+  color: #721c24;
+}
+
+/* Network Error Type */
+.network {
+  color: #856404; /* Dark yellow/brown text */
+  background-color: #fff3cd; /* Light yellow background */
+  border-color: #ffeeba; /* Yellowish border */
+}
+.network .errorTitle {
+  color: #856404;
+}
+
+/* Validation Error Type */
+.validation {
+  color: #0c5460; /* Dark cyan text */
+  background-color: #d1ecf1; /* Light cyan background */
+  border-color: #bee5eb; /* Cyan border */
+}
+.validation .errorTitle {
+  color: #0c5460;
+}
+
+/* Server Error Type */
+.server {
+  color: #721c24; /* Dark red text */
+  background-color: #f8d7da; /* Light red background */
+  border-color: #f5c6cb; /* Reddish border */
+}
+.server .errorTitle {
+  color: #721c24;
+}
+
+/* Auth Error Type */
+.auth {
+  color: #495057; /* Dark gray text */
+  background-color: #e2e3e5; /* Light gray background */
+  border-color: #d6d8db; /* Gray border */
+}
+.auth .errorTitle {
+  color: #495057;
+}

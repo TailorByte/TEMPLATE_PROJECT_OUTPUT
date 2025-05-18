@@ -1,0 +1,1 @@
+# This file makes 'core_project_name' a Python package.

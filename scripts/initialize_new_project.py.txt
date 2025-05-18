@@ -1,0 +1,451 @@
+import os
+import shutil
+import json
+import copy
+import re
+import subprocess
+
+# --- Configuration ---
+SOURCE_DIR_PATH = r"C:\git\TEMPLATE_PROJECT_OUTPUT"
+BASE_GIT_DIR = r"C:\git"
+
+# Placeholders to be replaced
+PLACEHOLDER_PROJECT_NAME_GENERIC = "GuardianRoute" # General project name placeholder in template
+PLACEHOLDER_TEMPLATE_DIR_NAME = "TEMPLATE_PROJECT_OUTPUT" # Specific name of the template directory
+
+# New constants for template directories and internal placeholders
+BACKEND_TEMPLATE_DIR_NAME = "backend_template"
+FRONTEND_TEMPLATE_DIR_NAME = "frontend_template"
+DJANGO_CORE_PLACEHOLDER_NAME = "core_project_name" # Used within backend_template
+REACT_APP_PLACEHOLDER_NAME = "frontend-app-name" # Used in frontend_template/package.json
+TARGET_BACKEND_DIR_NAME = "backend"
+TARGET_FRONTEND_DIR_NAME = "frontend"
+
+# Slugs of the template modes to use as bases from the source custom_modes.json
+TEMPLATE_MODE_SLUGS = {
+    "backend": "backend-api-django-development",
+    "frontend": "frontend-react-development",
+    "db": "database-schema-migration-development",
+    "orchestrator": "orchestrator-guardianroute"
+}
+
+def validate_project_name(project_name):
+    """Validates the project name."""
+    if not project_name:
+        print("Error: Project name cannot be empty.")
+        return False
+    if re.search(r'[<>:"/\\|?*\s]', project_name):
+        print(f"Error: Project name '{project_name}' contains invalid characters or spaces.")
+        return False
+    return True
+
+def slugify(name):
+    """
+    Simple slugify function:
+    - Converts to lowercase.
+    - Replaces spaces and underscores with hyphens.
+    - Removes other non-alphanumeric characters (keeps hyphens).
+    """
+    name = name.lower()
+    name = re.sub(r'[\s_]+', '-', name)
+    name = re.sub(r'[^\w\-]', '', name) # \w includes alphanumeric and underscore
+    name = re.sub(r'^-+|-+$', '', name) # Remove leading/trailing hyphens
+    return name if name else "default-slug"
+
+
+def get_project_name():
+    """Prompts the user for a project name and validates it."""
+    while True:
+        project_name = input("Enter the new project name (e.g., MyNewApp): ").strip()
+        if validate_project_name(project_name):
+            target_dir = os.path.join(BASE_GIT_DIR, project_name)
+            if os.path.exists(target_dir):
+                overwrite = input(f"Directory '{target_dir}' already exists. Overwrite? (yes/no): ").lower()
+                if overwrite == 'yes':
+                    print(f"Proceeding with overwrite for '{target_dir}'.")
+                    try:
+                        shutil.rmtree(target_dir) # Remove existing directory before copying
+                    except OSError as e:
+                        print(f"Error: Could not remove existing directory '{target_dir}'. {e}")
+                        return None # Indicate failure
+                    return project_name
+                else:
+                    print("Exiting. Please choose a different project name or allow overwrite.")
+                    return None # Indicate user chose not to proceed
+            return project_name
+        # Loop continues if validation fails but not for existence check
+
+def replace_in_file_content(content, new_project_name, new_project_name_slugified):
+    """Performs string replacements in the given content."""
+    # Path for the new project, ensuring backslashes for Windows paths
+    new_project_path_placeholder = os.path.join(BASE_GIT_DIR, new_project_name) # C:\git\[new_project_name]
+    # Path for the template project, ensuring backslashes
+    template_project_path_placeholder = os.path.join(BASE_GIT_DIR, PLACEHOLDER_TEMPLATE_DIR_NAME) # C:\git\TEMPLATE_PROJECT_OUTPUT
+
+    content = content.replace(PLACEHOLDER_PROJECT_NAME_GENERIC, new_project_name)
+    # Replace full template path string (e.g., C:\git\TEMPLATE_PROJECT_OUTPUT)
+    content = content.replace(template_project_path_placeholder, new_project_path_placeholder)
+    # Replace template directory name if it appears standalone
+    content = content.replace(PLACEHOLDER_TEMPLATE_DIR_NAME, new_project_name)
+    # Replace Django core project placeholder name
+    content = content.replace(DJANGO_CORE_PLACEHOLDER_NAME, new_project_name_slugified)
+    return content
+
+def process_custom_modes_json(source_custom_modes_path, target_custom_modes_path, new_project_name, new_project_name_slugified):
+    """
+    Processes the custom_modes.json file for the new project.
+    - Replaces "GuardianRoute" with new_project_name.
+    - Parameterizes slugs and names.
+    - Adjusts specific paths.
+    """
+    try:
+        with open(source_custom_modes_path, 'r', encoding='utf-8') as f:
+            original_data = json.load(f)
+    except Exception as e:
+        print(f"Error reading source custom_modes.json ('{source_custom_modes_path}'): {e}")
+        return
+
+    # Path definitions for replacement, based on the original "GuardianRoute" template structure
+    original_template_output_in_guardianroute_path = os.path.join(BASE_GIT_DIR, PLACEHOLDER_PROJECT_NAME_GENERIC, PLACEHOLDER_TEMPLATE_DIR_NAME) + os.sep
+    original_management_portal_in_guardianroute_path = os.path.join(BASE_GIT_DIR, PLACEHOLDER_PROJECT_NAME_GENERIC, "management-portal") + os.sep
+    new_management_portal_path = os.path.join(BASE_GIT_DIR, new_project_name, "management-portal") + os.sep
+
+    updated_custom_modes = []
+
+    for mode_config_original in original_data.get("customModes", []):
+        new_mode = copy.deepcopy(mode_config_original)
+
+        # Step 1: Handle text content fields (roleDefinition, whenToUse, customInstructions)
+        for key in ['roleDefinition', 'whenToUse', 'customInstructions']:
+            if key in new_mode and isinstance(new_mode[key], str):
+                text_content = new_mode[key] # Start with original text for this mode
+
+                # 1a. Apply specific path replacements first (targeting "GuardianRoute" specific paths)
+                text_content = text_content.replace(original_template_output_in_guardianroute_path, "") # Make relative
+                text_content = text_content.replace(original_management_portal_in_guardianroute_path, new_management_portal_path)
+                
+                # 1b. Then, apply general "GuardianRoute" -> new_project_name replacement
+                text_content = text_content.replace(PLACEHOLDER_PROJECT_NAME_GENERIC, new_project_name)
+                
+                new_mode[key] = text_content
+
+        # Step 2: Handle 'name' field
+        if 'name' in new_mode and isinstance(new_mode['name'], str):
+            name_content = new_mode['name']
+            name_content = name_content.replace(PLACEHOLDER_PROJECT_NAME_GENERIC, new_project_name)
+            new_mode['name'] = name_content
+
+        # Step 3: Handle 'slug' field
+        original_slug = mode_config_original.get('slug')
+        current_slug_val = new_mode.get('slug', '') # slug after GuardianRoute might have been replaced if it was in the slug
+
+        if original_slug == "orchestrator-guardianroute":
+            new_mode['slug'] = f"orchestrator-{new_project_name_slugified}"
+        elif original_slug == TEMPLATE_MODE_SLUGS.get("backend"): # "backend-api-django-development"
+            new_mode['slug'] = f"{original_slug}-{new_project_name_slugified}"
+        elif original_slug == TEMPLATE_MODE_SLUGS.get("frontend"): # "frontend-react-development"
+            new_mode['slug'] = f"{original_slug}-{new_project_name_slugified}"
+        elif original_slug == TEMPLATE_MODE_SLUGS.get("db"): # "database-schema-migration-development"
+            new_mode['slug'] = f"{original_slug}-{new_project_name_slugified}"
+        else: # For other slugs, ensure "GuardianRoute" is replaced if it was part of the slug.
+            if isinstance(current_slug_val, str):
+                 new_mode['slug'] = current_slug_val.replace(PLACEHOLDER_PROJECT_NAME_GENERIC, new_project_name)
+                 # If these custom slugs also need the new_project_name_slugified treatment,
+                 # that would be an additional rule. For now, just replacing GuardianRoute.
+
+        # Step 4: Update 'source' to "project"
+        new_mode["source"] = "project"
+
+        updated_custom_modes.append(new_mode)
+
+    output_json_structure = {"customModes": updated_custom_modes}
+
+    try:
+        os.makedirs(os.path.dirname(target_custom_modes_path), exist_ok=True)
+        with open(target_custom_modes_path, 'w', encoding='utf-8') as f:
+            json.dump(output_json_structure, f, indent=2)
+        print(f"Successfully processed and wrote new '{os.path.basename(target_custom_modes_path)}' to '{target_custom_modes_path}'")
+    except Exception as e:
+        print(f"Error writing target custom_modes.json ('{target_custom_modes_path}'): {e}")
+
+
+def main():
+    print("Project Initialization Script")
+    print("-----------------------------")
+
+    new_project_name = get_project_name()
+    if not new_project_name:
+        return # Exit if project name acquisition failed
+
+    target_dir_path = os.path.join(BASE_GIT_DIR, new_project_name)
+
+    # Step 3: Create Target Directory (get_project_name handles overwrite logic which includes deletion)
+    try:
+        if not os.path.exists(target_dir_path): # If not overwriting, it won't exist
+             os.makedirs(target_dir_path)
+        print(f"Target directory '{target_dir_path}' is ready.")
+    except OSError as e:
+        print(f"Error creating target directory '{target_dir_path}': {e}")
+        return
+
+    # Step 4: Copy Files and Directories
+    print(f"Copying files from '{SOURCE_DIR_PATH}' to '{target_dir_path}'...")
+    try:
+        # shutil.copytree(SOURCE_DIR_PATH, target_dir_path, dirs_exist_ok=True) # Python 3.8+
+        # Manual copy to use dirs_exist_ok=True behavior for broader compatibility if needed,
+        # or handle if script itself is in source_dir.
+        # For simplicity, assuming dirs_exist_ok=True is acceptable or Python 3.8+
+        for item in os.listdir(SOURCE_DIR_PATH):
+            s = os.path.join(SOURCE_DIR_PATH, item)
+            d = os.path.join(target_dir_path, item)
+            if os.path.isdir(s):
+                shutil.copytree(s, d, dirs_exist_ok=True)
+            else:
+                shutil.copy2(s, d) # copy2 preserves metadata
+        print("File copying complete.")
+    except Exception as e:
+        print(f"Error copying files: {e}")
+        return
+
+    new_project_name_slugified = slugify(new_project_name)
+
+    # Step 4b: Rename backend_template and frontend_template directories
+    print(f"Renaming '{BACKEND_TEMPLATE_DIR_NAME}' to '{TARGET_BACKEND_DIR_NAME}' and '{FRONTEND_TEMPLATE_DIR_NAME}' to '{TARGET_FRONTEND_DIR_NAME}'...")
+    copied_backend_template_path = os.path.join(target_dir_path, BACKEND_TEMPLATE_DIR_NAME)
+    final_backend_path = os.path.join(target_dir_path, TARGET_BACKEND_DIR_NAME)
+    copied_frontend_template_path = os.path.join(target_dir_path, FRONTEND_TEMPLATE_DIR_NAME)
+    final_frontend_path = os.path.join(target_dir_path, TARGET_FRONTEND_DIR_NAME)
+
+    try:
+        if os.path.exists(copied_backend_template_path):
+            os.rename(copied_backend_template_path, final_backend_path)
+            print(f"Renamed '{copied_backend_template_path}' to '{final_backend_path}'")
+
+            # Rename the internal Django project directory
+            django_core_old_path = os.path.join(final_backend_path, DJANGO_CORE_PLACEHOLDER_NAME)
+            django_core_new_path = os.path.join(final_backend_path, new_project_name_slugified)
+            if os.path.exists(django_core_old_path):
+                os.rename(django_core_old_path, django_core_new_path)
+                print(f"Renamed Django core project dir to '{django_core_new_path}'")
+            else:
+                print(f"Warning: Django core placeholder dir '{django_core_old_path}' not found for renaming.")
+
+        else:
+            print(f"Warning: '{copied_backend_template_path}' not found for renaming. Skipping backend template rename.")
+
+        if os.path.exists(copied_frontend_template_path):
+            os.rename(copied_frontend_template_path, final_frontend_path)
+            print(f"Renamed '{copied_frontend_template_path}' to '{final_frontend_path}'")
+        else:
+            print(f"Warning: '{copied_frontend_template_path}' not found for renaming. Skipping frontend template rename.")
+    except OSError as e:
+        print(f"Error renaming template directories: {e}")
+        # Decide if this is a fatal error or if script can continue
+        # return # For now, let's make it fatal if renaming fails for expected dirs
+
+    # Step 5: Global Content Replacement
+    # TODO: This section will be updated to use a new function that handles specific replacements
+    # for backend (DJANGO_CORE_PLACEHOLDER_NAME) and frontend (REACT_APP_PLACEHOLDER_NAME in package.json)
+    # in addition to the generic ones.
+    print("Performing global content replacements...")
+    original_custom_modes_filename = "custom_modes.json"
+    
+    for root, _, files in os.walk(target_dir_path):
+        for filename in files:
+            if filename == original_custom_modes_filename: # Skip custom_modes.json for now
+                continue
+            
+            filepath = os.path.join(root, filename)
+            try:
+                # Try reading as text, skip if binary or encoding error
+                with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+                    content = f.read()
+                
+                # Check if any placeholder is actually in the content to avoid unnecessary writes
+                if (PLACEHOLDER_PROJECT_NAME_GENERIC in content or
+                    PLACEHOLDER_TEMPLATE_DIR_NAME in content or
+                    os.path.join(BASE_GIT_DIR, PLACEHOLDER_TEMPLATE_DIR_NAME) in content or # Check for full path placeholder
+                    DJANGO_CORE_PLACEHOLDER_NAME in content): # Check for Django core placeholder
+                    
+                    modified_content = replace_in_file_content(content, new_project_name, new_project_name_slugified)
+                    if modified_content != content:
+                        with open(filepath, 'w', encoding='utf-8') as f:
+                            f.write(modified_content)
+                        # print(f"Updated: {filepath}")
+            except Exception as e:
+                # This might catch binary files or other issues; log or ignore.
+                # print(f"Skipping content replacement for {filepath} (possibly binary or error): {e}")
+                pass # Silently skip files that can't be read as text or cause other errors
+    print("Global content replacements complete.")
+
+    # Step 5b: Specifically update frontend/package.json "name" field
+    frontend_package_json_path = os.path.join(final_frontend_path, "package.json")
+    if os.path.exists(frontend_package_json_path):
+        print(f"Updating 'name' in '{frontend_package_json_path}'...")
+        try:
+            # Read, modify, and write JSON safely
+            with open(frontend_package_json_path, 'r+', encoding='utf-8') as f:
+                try:
+                    pkg_data = json.load(f)
+                except json.JSONDecodeError as e:
+                    print(f"Error decoding JSON from '{frontend_package_json_path}': {e}. Skipping package.json name update.")
+                    # Re-raise to skip the 'else' block of the outer try-except if JSON is broken
+                    # This ensures we don't try to operate on a file we couldn't parse.
+                    # However, for robustness in the script, we might just log and continue other steps.
+                    # For now, let's allow other steps to continue by not re-raising.
+                    pkg_data = None # Indicate parsing failure
+
+                if pkg_data and pkg_data.get("name") == REACT_APP_PLACEHOLDER_NAME:
+                    pkg_data["name"] = new_project_name_slugified
+                    f.seek(0)  # Go to the beginning of the file
+                    json.dump(pkg_data, f, indent=2)  # indent=2 is common for package.json
+                    f.truncate()  # Remove remaining part of old file if new content is shorter
+                    print(f"Updated 'name' in '{frontend_package_json_path}' to '{new_project_name_slugified}'.")
+                elif pkg_data: # pkg_data was loaded, but name didn't match
+                    print(f"Placeholder name '{REACT_APP_PLACEHOLDER_NAME}' not found or already changed in '{frontend_package_json_path}'. No change made to 'name'.")
+                # If pkg_data is None (JSONDecodeError), the error is already printed.
+        except Exception as e: # Catch other file IO errors or unexpected issues
+            print(f"Error processing '{frontend_package_json_path}': {e}")
+    else:
+        print(f"Warning: '{frontend_package_json_path}' not found. Skipping package.json name update.")
+
+    # Step 6: Process custom_modes.json
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(script_dir)
+    source_custom_modes_file = os.path.join(project_root, original_custom_modes_filename)
+    target_custom_modes_file = os.path.join(target_dir_path, original_custom_modes_filename)
+    print(f"Processing '{original_custom_modes_filename}' for the new project...")
+    process_custom_modes_json(source_custom_modes_file, target_custom_modes_file, new_project_name, new_project_name_slugified)
+
+    # Step 7: Create .env file from .env.example files
+    print("Creating root .env file from .env.example files...")
+    root_env_example_path = os.path.join(SOURCE_DIR_PATH, ".env.example") # Check in original template root
+    backend_env_example_path = os.path.join(final_backend_path, ".env.example")
+    frontend_env_example_path = os.path.join(final_frontend_path, ".env.example")
+    target_env_path = os.path.join(target_dir_path, ".env")
+
+    env_content_parts = []
+
+    if os.path.exists(root_env_example_path):
+        try:
+            with open(root_env_example_path, 'r', encoding='utf-8') as f:
+                env_content_parts.append(f"# --- Root .env.example content ---")
+                env_content_parts.append(f.read())
+            print(f"Found root .env.example: {root_env_example_path}")
+        except Exception as e:
+            print(f"Error reading root .env.example: {e}")
+    
+    if os.path.exists(backend_env_example_path):
+        try:
+            with open(backend_env_example_path, 'r', encoding='utf-8') as f:
+                env_content_parts.append(f"\n\n# --- Backend .env.example content (from {TARGET_BACKEND_DIR_NAME}/.env.example) ---")
+                env_content_parts.append(f.read())
+            print(f"Found backend .env.example: {backend_env_example_path}")
+        except Exception as e:
+            print(f"Error reading backend .env.example: {e}")
+
+    if os.path.exists(frontend_env_example_path):
+        try:
+            with open(frontend_env_example_path, 'r', encoding='utf-8') as f:
+                env_content_parts.append(f"\n\n# --- Frontend .env.example content (from {TARGET_FRONTEND_DIR_NAME}/.env.example) ---")
+                env_content_parts.append(f.read())
+            print(f"Found frontend .env.example: {frontend_env_example_path}")
+        except Exception as e:
+            print(f"Error reading frontend .env.example: {e}")
+            
+    if env_content_parts:
+        try:
+            with open(target_env_path, 'w', encoding='utf-8') as f:
+                f.write("\n".join(env_content_parts))
+            print(f"Successfully created .env file at '{target_env_path}'. Please review and fill in necessary values.")
+        except Exception as e:
+            print(f"Error writing .env file: {e}")
+    else:
+        print("No .env.example files found to create .env from.")
+
+    # Step 8: Optional automated setup steps
+    print("-----------------------------")
+    print("Optional Setup Steps:")
+
+    # Git Init
+    if input("Initialize a new Git repository in the project? (yes/no): ").lower() == 'yes':
+        try:
+            subprocess.run(['git', 'init'], cwd=target_dir_path, check=True)
+            print(f"Successfully initialized Git repository in '{target_dir_path}'.")
+        except FileNotFoundError:
+            print("Error: Git command not found. Please ensure Git is installed and in your PATH.")
+        except subprocess.CalledProcessError as e:
+            print(f"Error initializing Git repository: {e}")
+        except Exception as e:
+            print(f"An unexpected error occurred during git init: {e}")
+    
+    # Backend Dependencies
+    backend_requirements_path = os.path.join(final_backend_path, "requirements.txt")
+    if os.path.exists(backend_requirements_path):
+        if input(f"Install backend Python dependencies from '{backend_requirements_path}'? (yes/no): ").lower() == 'yes':
+            print(f"Attempting to install backend dependencies. This may take a moment...")
+            # Assuming a virtual environment should be handled by the user outside this script for now,
+            # or the script could attempt to create one. For simplicity, just running pip.
+            # A more robust solution would check for venv or allow specifying python executable.
+            try:
+                # Try to find a python executable, common names
+                python_executables = ['python3', 'python', 'py']
+                pip_installed = False
+                for py_exec in python_executables:
+                    try:
+                        # Check if pip module can be run with this python version
+                        subprocess.run([py_exec, '-m', 'pip', '--version'], check=True, capture_output=True)
+                        # Attempt to install
+                        pip_command = [py_exec, '-m', 'pip', 'install', '-r', backend_requirements_path]
+                        print(f"Running: {' '.join(pip_command)} in {final_backend_path}")
+                        subprocess.run(pip_command, cwd=final_backend_path, check=True)
+                        print("Backend dependencies installed successfully.")
+                        pip_installed = True
+                        break # Success
+                    except FileNotFoundError:
+                        continue # Try next python executable
+                    except subprocess.CalledProcessError as e:
+                        print(f"Error installing backend dependencies with {py_exec}: {e}")
+                        print("Make sure you have a virtual environment activated or Python/pip configured correctly.")
+                        break # Failed with this python, stop trying
+                if not pip_installed and not any(subprocess.run([py_exec, '-m', 'pip', '--version'], capture_output=True).returncode == 0 for py_exec in python_executables):
+                     print("Could not find a working Python/pip executable to install backend dependencies.")
+            except Exception as e:
+                print(f"An unexpected error occurred during backend dependency installation: {e}")
+    
+    # Frontend Dependencies
+    frontend_package_json_path_for_install = os.path.join(final_frontend_path, "package.json")
+    if os.path.exists(frontend_package_json_path_for_install):
+        if input(f"Install frontend Node.js dependencies from '{frontend_package_json_path_for_install}'? (yes/no): ").lower() == 'yes':
+            print(f"Attempting to install frontend dependencies. This may take a moment...")
+            try:
+                # Check for npm first, then yarn as a fallback
+                npm_available = shutil.which("npm") is not None
+                yarn_available = shutil.which("yarn") is not None
+                
+                install_command = []
+                if npm_available:
+                    install_command = ['npm', 'install']
+                elif yarn_available:
+                    install_command = ['yarn', 'install']
+                else:
+                    print("Error: Neither npm nor yarn found. Please install Node.js and npm/yarn.")
+
+                if install_command:
+                    print(f"Running: {' '.join(install_command)} in {final_frontend_path}")
+                    subprocess.run(install_command, cwd=final_frontend_path, check=True, shell=True) # shell=True for npm/yarn on Windows
+                    print("Frontend dependencies installed successfully.")
+
+            except FileNotFoundError: # Should be caught by shutil.which
+                print("Error: npm or yarn command not found. Please ensure Node.js and npm/yarn are installed and in your PATH.")
+            except subprocess.CalledProcessError as e:
+                print(f"Error installing frontend dependencies: {e}")
+            except Exception as e:
+                print(f"An unexpected error occurred during frontend dependency installation: {e}")
+
+    print("-----------------------------")
+    print(f"Project '{new_project_name}' initialized successfully at '{target_dir_path}'.")
+    print("Please review the generated .env file and complete any necessary setup steps mentioned in the README files.")
+
+if __name__ == "__main__":
+    main()
